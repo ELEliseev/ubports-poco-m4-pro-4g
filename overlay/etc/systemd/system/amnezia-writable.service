@@ -1,0 +1,40 @@
+[Unit]
+Description=Make the AmneziaWG configuration directory writable
+# The Ubuntu Touch rootfs is read-only, and /etc/amnezia lives on it. That broke
+# both halves of the VPN GUI: importing a configuration failed with
+# "[Errno 30] Read-only file system", and deleting one failed the same way -
+# which looked like the app simply ignoring the delete button.
+#
+# Ubuntu Touch solves this for its own directories through
+# /etc/system-image/writable-paths, which bind-mounts persistent storage over
+# /etc/ssh, /etc/NetworkManager/system-connections and the like. Doing the same
+# here with a unit rather than by shipping a patched writable-paths: that file
+# belongs to the distribution and a private copy of it would shadow whatever
+# UBports adds to it later.
+#
+# "transition" semantics are reproduced by the first-run copy below, so an
+# existing configuration is carried over instead of disappearing.
+DefaultDependencies=no
+After=userdata.mount android-data.mount local-fs.target
+Before=awg-control.service multi-user.target
+Conflicts=shutdown.target
+Before=shutdown.target
+ConditionPathIsDirectory=/userdata
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'set -e; \
+  mkdir -p /userdata/amnezia; \
+  if [ ! -e /userdata/amnezia/.transitioned ]; then \
+      cp -a /etc/amnezia/. /userdata/amnezia/ 2>/dev/null || true; \
+      touch /userdata/amnezia/.transitioned; \
+  fi; \
+  chmod 700 /userdata/amnezia; \
+  mkdir -p /userdata/amnezia/amneziawg; \
+  chmod 700 /userdata/amnezia/amneziawg; \
+  mountpoint -q /etc/amnezia || mount --bind /userdata/amnezia /etc/amnezia'
+ExecStop=/bin/sh -c 'mountpoint -q /etc/amnezia && umount /etc/amnezia || true'
+
+[Install]
+WantedBy=multi-user.target

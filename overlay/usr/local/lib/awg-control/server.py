@@ -50,6 +50,7 @@ UI = r"""<!doctype html>
   button { font:inherit; border:0; border-radius:9px; padding:11px 18px;
            background:var(--accent); color:#fff; font-weight:600; }
   button.sec { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  button.danger { color:#c0392b; border-color:#c0392b; }
   button:disabled { opacity:.5; }
   textarea { width:100%; min-height:90px; border:1px solid var(--line); border-radius:9px;
              padding:10px; font:14px monospace; background:var(--bg); color:var(--text); }
@@ -100,21 +101,57 @@ async function refresh() {
         <button onclick="toggle('${esc(t.name)}', ${t.up})">${t.up ? 'Отключить' : 'Подключить'}</button>
       </div>
       ${t.info ? '<div class="info">' + esc(t.info) + '</div>' : ''}
-      ${t.up ? '' : '<div class="sp"></div><button class="sec" onclick="del(\'' + esc(t.name) + '\')">Удалить</button>'}
+      ${t.up ? '' : '<div class="sp"></div><button class="sec" id="del-' + esc(t.name) + '" onclick="del(\'' + esc(t.name) + '\')">Удалить</button>'}
+      <div class="err" id="delerr-${esc(t.name)}"></div>
     </div>`).join('');
 }
 
 async function toggle(name, up) {
+  const err = document.getElementById('delerr-' + name);
+  if (err) err.textContent = '';
   document.querySelectorAll('button').forEach(b => b.disabled = true);
   const d = await api('/api/' + (up ? 'down' : 'up') + '?name=' + encodeURIComponent(name), {method:'POST'});
-  if (d.error) alert(d.error);
   await refresh();
   document.querySelectorAll('button').forEach(b => b.disabled = false);
+  if (d.error) {
+    // Inline, not alert(): webapp-container does not always show the browser
+    // dialogs, and a failed connect would then look like nothing happening.
+    const e2 = document.getElementById('delerr-' + name);
+    if (e2) e2.textContent = d.error; else console.error(d.error);
+  }
 }
 
+// Two-step confirmation instead of confirm(): webapp-container does not always
+// provide the browser dialogs, and there confirm() returns undefined, so the
+// old code returned early and deleting silently did nothing.
+const pendingDelete = {};
+
 async function del(name) {
-  if (!confirm('Удалить настройку «' + name + '»?')) return;
-  await api('/api/delete?name=' + encodeURIComponent(name), {method:'POST'});
+  const btn = document.getElementById('del-' + name);
+  const err = document.getElementById('delerr-' + name);
+  if (err) err.textContent = '';
+
+  if (!pendingDelete[name]) {
+    pendingDelete[name] = setTimeout(() => {
+      delete pendingDelete[name];
+      if (btn) { btn.textContent = 'Удалить'; btn.classList.remove('danger'); }
+    }, 5000);
+    if (btn) { btn.textContent = 'Точно удалить?'; btn.classList.add('danger'); }
+    return;
+  }
+
+  clearTimeout(pendingDelete[name]);
+  delete pendingDelete[name];
+  if (btn) { btn.disabled = true; btn.textContent = 'Удаляю…'; }
+
+  const d = await api('/api/delete?name=' + encodeURIComponent(name), {method:'POST'});
+  if (d.error) {
+    // Errors used to be dropped on the floor here, so a failure looked exactly
+    // like nothing happening at all.
+    if (err) err.textContent = d.error;
+    if (btn) { btn.disabled = false; btn.textContent = 'Удалить'; btn.classList.remove('danger'); }
+    return;
+  }
   refresh();
 }
 
