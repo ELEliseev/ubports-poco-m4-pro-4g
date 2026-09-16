@@ -1,0 +1,37 @@
+[Unit]
+Description=Permissions on the MediaTek CCCI modem channels
+# Voice call audio travels between the audio subsystem and the modem over the
+# CCCI channels. The kernel creates every /dev/ccci* node as 0600 root:root; on
+# stock Android ueventd relabels them from /vendor/etc/ueventd.rc, and inside
+# the Halium container nothing does. The vendor audio HAL then loops on
+#
+#     SpeechMessengerNormal: openCcciDriver(), open(/dev/ccci_aud) fail!!
+#     mCcciDeviceHandler: -1, errno: 13
+#
+# errno 13 is EACCES. The call connects, the UI switches PulseAudio to the
+# voicecall profile, and there is silence in both directions because the speech
+# path to the modem was never opened. Speech_SHM_Init stays 'off'.
+#
+# Note the HAL runs inside PulseAudio on the Ubuntu side, loaded through
+# libhybris - which is why the node has to be reachable by the phablet user
+# rather than by an Android uid. The distribution already puts phablet in the
+# audio (1005) and radio (1001) groups, so ownership is all that was missing.
+#
+# Ownership follows /vendor/etc/ueventd.rc: /dev/ccci* is radio:radio, and the
+# audio channels are audio:audio.
+Before=lightdm.service
+After=android-data.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 1 60); do [ -e /dev/ccci_aud ] && break; sleep 1; done; \
+  for n in /dev/ccci* /dev/ttyC* /dev/eemcs*; do \
+      [ -e "$n" ] && chown root:1001 "$n" && chmod 660 "$n"; done; \
+  for n in /dev/ccci_pcm_rx /dev/ccci_pcm_tx /dev/ccci_aud /dev/ccci2_aud \
+           /dev/ccci3_aud /dev/ccci_raw_audio /dev/ccci3_raw_audio /dev/eemcs_aud; do \
+      [ -e "$n" ] && chown root:1005 "$n" && chmod 660 "$n"; done; \
+  true'
+
+[Install]
+WantedBy=multi-user.target
