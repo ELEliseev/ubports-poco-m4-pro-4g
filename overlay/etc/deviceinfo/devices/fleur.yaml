@@ -1,0 +1,19 @@
+# Xiaomi fleur (Redmi Note 11S / Poco M4 Pro 4G)
+#
+# Only what has to differ from the defaults. Everything else is deliberately
+# left alone: the GridUnit and orientations the generic Halium profile provides
+# are already right for this panel (GridUnit 21 - setting it here would change
+# the whole UI scale).
+#
+# OfonoPlugin selects the telephony backend in
+# /usr/libexec/lxc-android-config/ofonod-wrapper. Without it the wrapper
+# defaults to the socket-based RIL plugin, which looks for /dev/socket/rild -
+# a path that does not exist on Android 12. ofono then registers no modems at
+# all and there is no telephony whatsoever.
+fleur:
+  Names:
+    - fleur
+    - Redmi Note 11S
+    - Poco M4 Pro 4G
+  PrettyName: Xiaomi Redmi Note 11S
+  OfonoPlugin: binder

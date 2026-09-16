@@ -13,12 +13,13 @@ The phone is usable as a daily driver. Calls are the notable gap.
 
 | Works | Does not |
 |---|---|
-| boot, systemd, ssh | calls (untested) |
+| boot, systemd, ssh | calls (modem registers; audio path untested) |
 | 1080×2400 display, Mali-G57, OpenGL ES 3.2 | Bluetooth (`hci0` never comes up) |
 | Lomiri, keyboard, indicators, touchscreen | MTP and developer mode |
 | Wi-Fi, mobile data, battery | video recording bitrate is absurd (~130 Mbit/s) |
 | audio, microphone, the stock player | |
 | camera: stills, viewfinder, video **with sound** | |
+| telephony: modem, SIM, LTE registration | |
 | hardware video playback | |
 | AmneziaWG VPN with a small GUI | |
 
