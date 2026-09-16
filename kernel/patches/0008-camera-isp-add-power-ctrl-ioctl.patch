@@ -1,0 +1,127 @@
+diff --git a/drivers/misc/mediatek/cameraisp/src/mt6853/camera_isp.c b/drivers/misc/mediatek/cameraisp/src/mt6853/camera_isp.c
+index 3ab3486a9..7a20f765b 100644
+--- a/drivers/misc/mediatek/cameraisp/src/mt6853/camera_isp.c
++++ b/drivers/misc/mediatek/cameraisp/src/mt6853/camera_isp.c
+@@ -348,6 +348,10 @@ struct IspWorkqueTable {
+ 
+ static void ISP_BH_Workqueue(struct work_struct *pWork);
+ 
++/* Defined further down the file, but needed already in ISP_ioctl (ISP_POWER_CTRL). */
++static inline void ISP_StopHW(int module);
++static inline void ISP_StopSVHW(int module);
++
+ static struct IspWorkqueTable isp_workque[ISP_IRQ_TYPE_AMOUNT] = {
+ 	{ISP_IRQ_TYPE_INT_CAM_A_ST},
+ 	{ISP_IRQ_TYPE_INT_CAM_B_ST},
+@@ -5590,6 +5594,60 @@ static long ISP_ioctl(struct file *pFile, unsigned int Cmd, unsigned long Param)
+ 			Ret = -EFAULT;
+ 		}
+ 	} break;
++	case ISP_POWER_CTRL: {
++		/* Powering the ISP up and down on the vendor HAL's request.
++		 * Taken from a later revision of this same driver (branch
++		 * camellian-t-oss). There the clocking is split per module;
++		 * here it is shared: ISP_EnableClock brings up CAMSYS and
++		 * RAWA/B/C together, and ISP_ConfigDMAControl configures every
++		 * module in a loop. So the module number is only validated here
++		 * and written to the log. The logic mirrors ISP_open and
++		 * ISP_release in this same file.
++		 */
++		unsigned int pwrctl[2] = {0};
++		unsigned int i = 0;
++
++		if (copy_from_user(&pwrctl, (void *)Param,
++			sizeof(unsigned int) * 2) != 0) {
++			LOG_NOTICE("ISP_POWER_CTRL copy_from_user failed\n");
++			Ret = -EFAULT;
++			break;
++		}
++
++		if (pwrctl[0] >= ISP_DEV_NODE_NUM) {
++			LOG_NOTICE("module index is invalid module(%d)!\n",
++				pwrctl[0]);
++			Ret = -EFAULT;
++			break;
++		}
++
++		LOG_INF("isp pwr_ctrl(%d,%d) enableClkCnt(%d)\n",
++			pwrctl[0], pwrctl[1], G_u4EnableClockCount);
++
++		if (pwrctl[1]) {
++			ISP_EnableClock(MTRUE);
++
++			spin_lock(&(IspInfo.SpinLockClock));
++			i = G_u4EnableClockCount;
++			spin_unlock(&(IspInfo.SpinLockClock));
++
++			if (i == 1)
++				ISP_ConfigDMAControl();
++		} else {
++			if (pwrctl[0] >= ISP_CAMSV_START_IDX)
++				ISP_StopSVHW(pwrctl[0]);
++			else if (pwrctl[0] < ISP_CAM_C_IDX)
++				ISP_StopHW(pwrctl[0]);
++
++			/* Exactly one drop per enable above: our counter is
++			 * shared, and emptying it here is not allowed - powering
++			 * one module down would then kill clocks that ISP_open
++			 * and other modules still hold. ISP_release takes care
++			 * of the remainder.
++			 */
++			ISP_EnableClock(MFALSE);
++		}
++	} break;
+ 	default: {
+ 		LOG_NOTICE("Unknown Cmd(%d)\n", Cmd);
+ 		Ret = -EPERM;
+@@ -5908,6 +5966,12 @@ static long ISP_ioctl_compat(struct file *filp, unsigned int cmd,
+ 
+ 		return ret;
+ 	}
++	case COMPAT_ISP_POWER_CTRL: {
++		ret = filp->f_op->unlocked_ioctl(
++			filp, ISP_POWER_CTRL, (unsigned long)compat_ptr(arg));
++
++		return ret;
++	}
+ 	case ISP_GET_DUMP_INFO:
+ 	case ISP_WAIT_IRQ:
+ 	case ISP_CLEAR_IRQ: /* structure (no pointer) */
+diff --git a/drivers/misc/mediatek/cameraisp/src/mt6853/inc/camera_isp.h b/drivers/misc/mediatek/cameraisp/src/mt6853/inc/camera_isp.h
+index d2d3bcfbc..9bf4c602c 100644
+--- a/drivers/misc/mediatek/cameraisp/src/mt6853/inc/camera_isp.h
++++ b/drivers/misc/mediatek/cameraisp/src/mt6853/inc/camera_isp.h
+@@ -711,7 +711,12 @@ enum ISP_CMD_ENUM {
+ 	ISP_CMD_ION_UNMAP_PA, /* AOSP ION: unmap physical address from fd */
+ 	ISP_CMD_ION_UNMAP_PA_BY_MODULE,
+ 	ISP_CMD_ION_GET_PA,
+-	ISP_CMD_SET_VIR_CQCNT
++	ISP_CMD_SET_VIR_CQCNT,
++	/* ISP power control. The vendor HAL sends this command before starting
++	 * the sensor; without it the frame stream never begins at all.
++	 * Must stay LAST: its number (50) is baked into the HAL.
++	 */
++	ISP_CMD_POWER_CTRL
+ };
+ 
+ enum ISP_HALT_DMA_ENUM {
+@@ -802,6 +807,9 @@ enum ISP_HALT_DMA_ENUM {
+ #define ISP_SET_VIR_CQCNT \
+ 	_IOWR(ISP_MAGIC, ISP_CMD_SET_VIR_CQCNT, unsigned int*)
+ 
++#define ISP_POWER_CTRL                            \
++	_IOWR(ISP_MAGIC, ISP_CMD_POWER_CTRL, unsigned int*)
++
+ #define ISP_SET_PM_QOS                           \
+ 	_IOWR(ISP_MAGIC, ISP_CMD_SET_PM_QOS, unsigned int)
+ 
+@@ -922,6 +930,9 @@ enum ISP_HALT_DMA_ENUM {
+ #define COMPAT_ISP_SET_VIR_CQCNT                 \
+ 	_IOWR(ISP_MAGIC, ISP_CMD_SET_VIR_CQCNT, compat_uptr_t)
+ 
++#define COMPAT_ISP_POWER_CTRL                 \
++	_IOWR(ISP_MAGIC, ISP_CMD_POWER_CTRL, compat_uptr_t)
++
+ #define COMPAT_ISP_DUMP_BUFFER                   \
+ 	_IOWR(ISP_MAGIC,                         \
+ 	      ISP_CMD_DUMP_BUFFER,               \

@@ -1,0 +1,33 @@
+diff --git a/drivers/gpu/drm/mediatek/mtk_drm_fb.c b/drivers/gpu/drm/mediatek/mtk_drm_fb.c
+index 5a1ed3865..15fc000d3 100644
+--- a/drivers/gpu/drm/mediatek/mtk_drm_fb.c
++++ b/drivers/gpu/drm/mediatek/mtk_drm_fb.c
+@@ -192,11 +192,28 @@ mtk_drm_mode_fb_create(struct drm_device *dev, struct drm_file *file,
+ 	struct mtk_drm_fb *mtk_fb = NULL;
+ 	struct drm_gem_object *gem = NULL;
+ 	struct mtk_drm_gem_obj *mtk_gem = NULL;
++	struct drm_mode_fb_cmd2 dim_cmd;
+ 	unsigned int width = cmd->width;
+ 	unsigned int height = cmd->height;
+ 	unsigned int size, bpp;
+ 	int ret;
+ 
++	/*
++	 * The vendor hwcomposer creates its internal dimming buffer as RGB332
++	 * ('RGB8'), while this driver only knows C8 for the same role - Xiaomi's
++	 * published sources diverging from the flashed kernel once again.
++	 *
++	 * Without normalising the format, drm_mode_setcrtc rejects the buffer
++	 * with -EINVAL ("Invalid pixel format RGB8"), the vendor composer@2.1
++	 * service aborts inside validateDisplay, and the Ubuntu Touch compositor
++	 * goes down right after it.
++	 */
++	if (cmd->pixel_format == DRM_FORMAT_RGB332) {
++		dim_cmd = *cmd;
++		dim_cmd.pixel_format = DRM_FORMAT_C8;
++		cmd = &dim_cmd;
++	}
++
+ 	if (cmd->pixel_format == DRM_FORMAT_C8)
+ 		goto fb_init;
+ 

@@ -1,0 +1,13 @@
+diff --git a/drivers/misc/mediatek/Kconfig.default b/drivers/misc/mediatek/Kconfig.default
+index c4855575c..c28c8bae5 100644
+--- a/drivers/misc/mediatek/Kconfig.default
++++ b/drivers/misc/mediatek/Kconfig.default
+@@ -58,7 +58,7 @@ config ANDROID_DEFAULT_SETTING
+ 	select FILE_LOCKING
+ 	select FS_ENCRYPTION
+ 	select FS_VERITY
+-	select FS_VERITY_BUILTIN_SIGNATURES
++	# select FS_VERITY_BUILTIN_SIGNATURES
+ 	select FUSE_FS
+ 	select FUTEX
+ 	select HARDENED_USERCOPY

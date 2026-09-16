@@ -1,0 +1,34 @@
+#!/bin/dash
+# Lay the libaudioclient fix over the Android image.
+# Why: see /etc/systemd/system/halium-audioflinger-fix.service.
+set -u
+DIR=/usr/lib/halium-audioflinger-fix
+
+mountpoint -q /android/system || { echo "/android/system not mounted, skipping" >&2; exit 0; }
+
+apply_one() {
+    target="$1"; replacement="$2"; expected="$3"
+    [ -f "$target" ] || { echo "no $target, skipping" >&2; return 0; }
+    [ -f "$replacement" ] || { echo "no $replacement, skipping" >&2; return 0; }
+    if mountpoint -q "$target"; then
+        echo "$target is already shadowed, skipping" >&2
+        return 0
+    fi
+    current=$(md5sum "$target" | cut -d' ' -f1)
+    if [ "$current" != "$expected" ]; then
+        echo "WARNING: $target is not the expected revision ($current, not $expected)." >&2
+        echo "Fix NOT applied: the GSI has changed, regenerate it with" >&2
+        echo "scripts/patch-libaudioclient.py." >&2
+        return 0
+    fi
+    if mount --bind "$replacement" "$target"; then
+        echo "fix applied: $target" >&2
+    else
+        echo "ERROR: could not shadow $target" >&2
+    fi
+    return 0
+}
+
+apply_one /android/system/lib/libaudioclient.so   "$DIR/libaudioclient32.so" 0b423cf0f64bc3d5f1943b9ac3fc4df1
+apply_one /android/system/lib64/libaudioclient.so "$DIR/libaudioclient64.so" dfb8a4e98176592dd49f5e212e410c31
+exit 0

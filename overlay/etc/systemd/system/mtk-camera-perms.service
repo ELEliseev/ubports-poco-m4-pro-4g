@@ -1,0 +1,26 @@
+[Unit]
+Description=Permissions on the MediaTek camera device nodes
+# The vendor camerahalserver runs as user cameraserver in group camera, while
+# the kernel creates the ISP nodes as 0600 root:root. On stock Android ueventd
+# relabels them (rules in /vendor/etc/ueventd.rc: 0660 system camera); inside
+# the Halium container that never happens. Without this the auto-exposure module
+# gets no sensor data: "ae_mgr: rSensorDynamicInfo.TgInfo = 0".
+#
+# The flash failed for the same reason: /dev/flashlight stays 0600 root:root and
+# camerahalserver (uid 1047) cannot open it. There is a chown line for it in
+# /vendor/etc/init/hw/init.mt6781.rc, but the node appears later than init runs
+# that line, so the rule never reaches it.
+Before=lightdm.service
+After=android-data.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 1 60); do [ -e /dev/kd_camera_hw ] && break; sleep 1; done; \
+  for n in /dev/camera-dip /dev/camera-fdvt /dev/camera-isp /dev/camera-mfb /dev/camera-rsc \
+           /dev/kd_camera_hw /dev/seninf /dev/seninf_n3d /dev/camera_eeprom* \
+           /dev/flashlight; do \
+    [ -e "$n" ] && chown 1000:1006 "$n" && chmod 660 "$n"; done; true'
+
+[Install]
+WantedBy=multi-user.target

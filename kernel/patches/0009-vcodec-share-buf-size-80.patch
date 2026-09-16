@@ -1,0 +1,19 @@
+diff --git a/include/uapi/linux/mtk_vcu_controls.h b/include/uapi/linux/mtk_vcu_controls.h
+index e47d744a2..19df9f220 100644
+--- a/include/uapi/linux/mtk_vcu_controls.h
++++ b/include/uapi/linux/mtk_vcu_controls.h
+@@ -17,7 +17,13 @@
+ #ifndef __UAPI_MTK_VCU_CONTROLS_H__
+ #define __UAPI_MTK_VCU_CONTROLS_H__
+ 
+-#define SHARE_BUF_SIZE 72
++/* 80, not 72: the vendor side (/vendor/bin/vpud and libvpud_vcodec.so) was
++ * built with this size. sizeof(struct share_obj) = 88 depends on it, and so do
++ * the ioctl numbers VCU_GET_OBJECT (0xc058760a) and VCU_SET_OBJECT
++ * (0x40587600) - both confirmed by disassembling the blob. With 72 the driver
++ * answered "Invalid cmd_number 0xc058760a" and video would not encode.
++ */
++#define SHARE_BUF_SIZE 80
+ #define LOG_INFO_SIZE 1024
+ #define VCODEC_CMDQ_CMD_MAX           (2048)
+ 

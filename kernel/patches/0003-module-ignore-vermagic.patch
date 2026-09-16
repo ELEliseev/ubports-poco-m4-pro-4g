@@ -1,0 +1,15 @@
+diff --git a/kernel/module.c b/kernel/module.c
+index 8bae68551..5e6a5c25d 100644
+--- a/kernel/module.c
++++ b/kernel/module.c
+@@ -3675,6 +3675,10 @@ static int unknown_module_param_cb(char *param, char *val, const char *modname,
+ static int load_module(struct load_info *info, const char __user *uargs,
+ 		       int flags)
+ {
++	//FIXME
++	flags |= MODULE_INIT_IGNORE_MODVERSIONS;
++	flags |= MODULE_INIT_IGNORE_VERMAGIC;
++
+ 	struct module *mod;
+ 	long err;
+ 	char *after_dashes;

@@ -1,0 +1,15 @@
+[Unit]
+Description=Power up the MediaTek Wi-Fi radio
+# On MTK there is no wlan0 interface until a 1 is written to /dev/wmtWifi:
+# that is how wlan_drv_gen4m loads the connac chip firmware. Without it
+# NetworkManager simply sees no wireless device at all.
+Before=NetworkManager.service
+After=android-data.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 1 60); do [ -e /dev/wmtWifi ] && break; sleep 1; done; echo 1 > /dev/wmtWifi'
+
+[Install]
+WantedBy=multi-user.target

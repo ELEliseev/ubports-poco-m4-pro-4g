@@ -1,0 +1,16 @@
+[Unit]
+Description=AmneziaWG via awg-quick(8) for %I
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
+Documentation=https://docs.amnezia.org/
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/awg-quick up %i
+ExecStop=/usr/local/bin/awg-quick down %i
+ExecReload=/bin/bash -c 'exec /usr/local/bin/awg syncconf %i <(exec /usr/local/bin/awg-quick strip %i)'
+Environment=WG_ENDPOINT_RESOLUTION_RETRIES=infinity
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+# The vendor's /vendor/etc/ueventd.rc asks for: /dev/ion 0666 system graphics.
+# Inside the Halium container ueventd does not do it and the node stays
+# 0600 root:root. Without this rule the client half of Codec2 (c2.mtk.*) cannot
+# open ION, gets an empty allocator and dies inside libcodec2_vndk.so copying a
+# std::string from a null pointer — which from the outside reads as "media-hub
+# died, playback error".
+KERNEL=="ion", MODE="0666"

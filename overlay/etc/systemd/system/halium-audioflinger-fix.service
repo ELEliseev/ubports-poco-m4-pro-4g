@@ -1,0 +1,38 @@
+[Unit]
+Description=libaudioclient fix: stop waiting for an AudioFlinger that cannot exist
+# Halium's patch 0004-halium-get-rid-of-using-AudioFlinger-for-recording cuts
+# AudioFlinger out of createRecord_l, getInputBufferSize, getInputFramesLost and
+# newAudioUniqueId, but misses AudioSystem::releaseAudioSessionId, which
+# ~AudioRecord() calls. There is no media.audio_flinger service in Halium at all,
+# and get_audio_flinger() loops on getService() forever, half a second at a time.
+#
+# The result: after a video recording is stopped MediaRecorderClient::release()
+# never returns (stack taken from the device: release -> ~StagefrightRecorder ->
+# ~AudioSource -> ~AudioRecord -> releaseAudioSessionId -> get_audio_flinger),
+# the binder transaction from the app never completes, and the camera is dead
+# until the app is restarted.
+#
+# This lays down libraries in which releaseAudioSessionId and
+# acquireAudioSessionId return immediately. Both return void; with no
+# AudioFlinger there is nothing to release.
+#
+# It has to run BEFORE the container: camera_service comes up with it and loads
+# the library once. Hence sysinit.target rather than multi-user.target —
+# lxc-android-config.service lives in the former.
+DefaultDependencies=no
+After=mount-android-partitions.service mount-android-system.service
+Before=lxc-android-config.service sysinit.target
+Conflicts=shutdown.target
+Before=shutdown.target
+ConditionPathExists=/usr/lib/halium-audioflinger-fix/libaudioclient32.so
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Only the GSI revision this patch was made for may be shadowed: after a CI
+# rebuild the checksums differ and the script quietly does nothing, rather than
+# laying an old library over a new image.
+ExecStart=/usr/lib/halium-audioflinger-fix/apply
+
+[Install]
+WantedBy=sysinit.target

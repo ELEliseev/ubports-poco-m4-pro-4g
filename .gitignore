@@ -1,0 +1,30 @@
+# Build working area: stays on disk, never published.
+# Third-party (UBports build tools, MiCode kernel sources, toolchains) and
+# everything that is rebuilt from the recipes in docs/.
+
+/build-ubports/
+/kernel-src/
+/ut-out/
+/rescued-third-party/
+
+# Private and editor state.
+# .claude/ holds this particular handset's serial number — must not be published.
+
+/.claude/
+/.kilo/
+/.vscode/
+
+# Junk
+
+*.orig
+*.rej
+*.bak
+*.bak-*
+*~
+.DS_Store
+
+# Filled in by scripts/fetch-prebuilts.sh and scripts/patch-media-hub.sh.
+# Third-party GPL/LGPL binaries, not redistributed here.
+
+/overlay/usr/lib/aarch64-linux-gnu/
+/overlay/usr/bin/media-hub-server

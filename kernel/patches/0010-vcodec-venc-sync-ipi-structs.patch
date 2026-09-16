@@ -1,0 +1,48 @@
+diff --git a/drivers/media/platform/mtk-vcodec/venc_ipi_msg.h b/drivers/media/platform/mtk-vcodec/venc_ipi_msg.h
+index 3c643ae15..cc251795d 100644
+--- a/drivers/media/platform/mtk-vcodec/venc_ipi_msg.h
++++ b/drivers/media/platform/mtk-vcodec/venc_ipi_msg.h
+@@ -220,6 +220,16 @@ struct venc_ap_ipi_msg_enc {
+ 	__s16 bs_fd;
+ 	__u8 fb_num_planes;
+ 	__u8 bs_mode;
++	/* The fields below come from the camellian-t-oss donor branch (same
++	 * mt6781). Without them the structure is shorter than the one the vendor
++	 * VCU firmware expects: it read past the end of the message and answered
++	 * ENCODE with status 1 (FAIL), so video would not encode at all. This
++	 * structure growing to 76 bytes is exactly why SHARE_BUF_SIZE had to go
++	 * from 72 to 80.
++	 */
++	__u32 meta_size;
++	__s16 meta_fd;
++	__u32 qpmap;
+ };
+ 
+ /**
+@@ -405,6 +415,18 @@ struct venc_vcu_config {
+ 	__u32 b_qp;
+ 	__u32 svp_mode;
+ 	__u32 tsvc;
++	/* From the donor as well: without these fields venc_vcu_config is
++	 * shorter than the vendor's, and it sits first in venc_vsi - so
++	 * sizeimage[] was read at the wrong offset and came out zero.
++	 */
++	__u32 max_qp;
++	__u32 min_qp;
++	__u32 i_p_qp_delta;
++	__u32 qp_control_mode;
++	__u32 frame_level_qp;
++	__u32 maxrefpnum;
++	__u32 maxrefbufFrameNum;
++	__u32 dummynal;
+ };
+ 
+ /**
+@@ -441,6 +463,7 @@ struct venc_info {
+ 	__u32 index;
+ 	__u64 timestamp;
+ 	__u32 roimap;
++	__u32 qpmap;	/* from the donor: otherwise the tail of venc_vsi shifts */
+ };
+ 
+ /**

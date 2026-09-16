@@ -1,0 +1,212 @@
+diff --git a/drivers/gpu/drm/drm_auth.c b/drivers/gpu/drm/drm_auth.c
+index fe85d041d..de3a0f81e 100644
+--- a/drivers/gpu/drm/drm_auth.c
++++ b/drivers/gpu/drm/drm_auth.c
+@@ -116,6 +116,7 @@ static int drm_set_master(struct drm_device *dev, struct drm_file *fpriv,
+ 	int ret = 0;
+ 
+ 	dev->master = drm_master_get(fpriv->master);
++	dev->master->owner_tgid = task_tgid_nr(current);
+ 	if (dev->driver->master_set) {
+ 		ret = dev->driver->master_set(dev, fpriv, new_master);
+ 		if (unlikely(ret != 0)) {
+@@ -177,8 +178,40 @@ int drm_setmaster_ioctl(struct drm_device *dev, void *data,
+ 		goto out_unlock;
+ 
+ 	if (dev->master) {
+-		ret = -EINVAL;
+-		goto out_unlock;
++		/*
++		 * The MediaTek vendor hwcomposer opens /dev/dri/card0 twice:
++		 * first the PQ subsystem, then the display code proper, which
++		 * is the one that asks to be master. The first opener becomes
++		 * master implicitly (drm_master_open), so the second one hits
++		 * -EINVAL forever and spins on retrying. On stock Android the
++		 * order is reversed and the problem never shows.
++		 *
++		 * Within a single process there is nobody to share the display
++		 * with, so hand the master over: the old handle stops being the
++		 * current master (drm_is_current_master compares against
++		 * dev->master) and the caller picks it up the normal way below.
++		 */
++		if (dev->master->owner_tgid != task_tgid_nr(current)) {
++			/*
++			 * A different process. This happens when the vendor
++			 * composer@2.1 service starts after the Ubuntu Touch
++			 * compositor: by then the compositor owns the display.
++			 * Refusing here deadlocks the system - the service
++			 * never registers IComposerExt, and the compositor
++			 * waits for that service over HIDL forever, because the
++			 * vendor hwcomposer is loaded straight into it.
++			 *
++			 * So answer with success without transferring
++			 * ownership: the real master stays with the
++			 * compositor, and the service gets as far as
++			 * registering. The right to actually modeset for these
++			 * nominal masters is granted separately, in
++			 * drm_ioctl(). On a phone with one compositor there is
++			 * nobody else to share the display with.
++			 */
++			goto out_unlock;
++		}
++		drm_master_put(&dev->master);
+ 	}
+ 
+ 	if (!file_priv->master) {
+@@ -193,6 +226,9 @@ int drm_setmaster_ioctl(struct drm_device *dev, void *data,
+ 
+ 	ret = drm_set_master(dev, file_priv, false);
+ out_unlock:
++	pr_info_ratelimited("drm: SET_MASTER from %s[%d] -> %d (owner %d)\n",
++			    current->comm, task_tgid_nr(current), ret,
++			    dev->master ? dev->master->owner_tgid : -1);
+ 	mutex_unlock(&dev->master_mutex);
+ 	return ret;
+ }
+@@ -288,6 +324,25 @@ void drm_master_release(struct drm_file *file_priv)
+  * Most of the modern IOCTL which require DRM_MASTER are for kernel modesetting
+  * - the current master is assumed to own the non-shareable display hardware.
+  */
++/**
++ * drm_same_process_as_master - is the display owned by this same process
++ * @fpriv: a client of the primary node
++ *
++ * The MediaTek vendor stack opens /dev/dri/card0 several times from one
++ * process, and only the first handle becomes the real master. The other handles
++ * of that same process may drive the display: there is no contention. Returns
++ * false for other processes - otherwise the vendor composer@2.1 service starts
++ * programming the panel in parallel with the compositor and the device hangs.
++ */
++bool drm_same_process_as_master(struct drm_file *fpriv)
++{
++	struct drm_device *dev = fpriv->minor->dev;
++
++	return fpriv->master && dev->master &&
++	       dev->master->owner_tgid == task_tgid_nr(current);
++}
++EXPORT_SYMBOL(drm_same_process_as_master);
++
+ bool drm_is_current_master(struct drm_file *fpriv)
+ {
+ 	return fpriv->is_master && fpriv->master == fpriv->minor->dev->master;
+diff --git a/drivers/gpu/drm/drm_ioctl.c b/drivers/gpu/drm/drm_ioctl.c
+index 318ebf376..050d7de23 100644
+--- a/drivers/gpu/drm/drm_ioctl.c
++++ b/drivers/gpu/drm/drm_ioctl.c
+@@ -501,8 +501,11 @@ int drm_version(struct drm_device *dev, void *data,
+ int drm_ioctl_permit(u32 flags, struct drm_file *file_priv)
+ {
+ 	/* ROOT_ONLY is only for CAP_SYS_ADMIN */
+-	if (unlikely((flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)))
++	if (unlikely((flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN))) {
++		pr_info_ratelimited("drm: ROOT_ONLY denied for %s[%d]\n",
++				    current->comm, task_tgid_nr(current));
+ 		return -EACCES;
++	}
+ 
+ 	/* AUTH is only for authenticated or render client */
+ 	if (unlikely((flags & DRM_AUTH) && !drm_is_render_client(file_priv) &&
+@@ -510,10 +513,24 @@ int drm_ioctl_permit(u32 flags, struct drm_file *file_priv)
+ 		return -EACCES;
+ 
+ 	/* MASTER is only for master or control clients */
+-	if (unlikely((flags & DRM_MASTER) && 
++	/*
++	 * A concession to the MediaTek vendor stack: several parties open the
++	 * display here (the Ubuntu Touch compositor with hwcomposer loaded into
++	 * it, the composer@2.1 service, pq@2.2), and only one of them can be the
++	 * real master. drm_setmaster_ioctl() answers the others with success
++	 * without transferring ownership, so that the vendor blobs do not
++	 * deadlock each other. Here those nominal masters are also allowed to
++	 * drive the display: being an ordinary client of the primary node, that
++	 * is holding a reference to a master, is enough.
++	 */
++	if (unlikely((flags & DRM_MASTER) &&
+ 		     !drm_is_current_master(file_priv) &&
+-		     !drm_is_control_client(file_priv)))
++		     !drm_same_process_as_master(file_priv) &&
++		     !drm_is_control_client(file_priv))) {
++		pr_info_ratelimited("drm: MASTER denied for %s[%d], flags %#x\n",
++				    current->comm, task_tgid_nr(current), flags);
+ 		return -EACCES;
++	}
+ 
+ 	/* Control clients must be explicitly allowed */
+ 	if (unlikely(!(flags & DRM_CONTROL_ALLOW) &&
+@@ -846,8 +863,13 @@ long drm_ioctl(struct file *filp,
+ 
+ 	if (kdata != stack_kdata)
+ 		kfree(kdata);
+-	if (retcode)
++	if (retcode) {
+ 		DRM_DEBUG("ret = %d\n", retcode);
++		/* Port diagnostics: which call was refused, and with what code. */
++		pr_info_ratelimited("drm: %s[%d] nr=%#x -> %d\n",
++				    current->comm, task_tgid_nr(current),
++				    nr, retcode);
++	}
+ 	return retcode;
+ }
+ EXPORT_SYMBOL(drm_ioctl);
+diff --git a/drivers/gpu/drm/mediatek/mtk_drm_drv.c b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+index 8b7c6c736..a6812bf17 100644
+--- a/drivers/gpu/drm/mediatek/mtk_drm_drv.c
++++ b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+@@ -2654,7 +2654,34 @@ int mtk_drm_get_master_info_ioctl(struct drm_device *dev,
+ {
+ 	int *ret = (int *)data;
+ 
+-	*ret = drm_is_current_master(file_priv);
++	/*
++	 * The vendor hwcomposer spins on this query and does nothing until it
++	 * hears "yes" ([DRMDEV] failed to get drm master, retry: N).
++	 *
++	 * On Ubuntu Touch that same hwcomposer is loaded straight into the
++	 * lomiri-system-compositor process, and the real master there is not its
++	 * handle: somebody else opened the display first (the PQ subsystem
++	 * inside the same process, or the vendor composer@2.1 service). So treat
++	 * the second handle as a master too - but only when the real owner of
++	 * the display is the same process. Saying "yes" to everyone is not an
++	 * option: the vendor composer@2.1 service in the Android container then
++	 * starts programming the panel at the same time as the compositor, and
++	 * the device hangs solid before the boot finishes (tested).
++	 */
++	/*
++	 * Answer "yes" to everyone. The real owner of the display remains
++	 * whoever opened the node first (in our layout, the composer@2.1 service
++	 * from the Android container): the right to program the panel is checked
++	 * separately in drm_ioctl(), and there the concession only applies within
++	 * the owning process. So two parties never touch the panel at once -
++	 * which is exactly what hung the device when the concession was global.
++	 *
++	 * Without this answer the copy of hwcomposer loaded inside
++	 * lomiri-system-compositor polls forever (hundreds of thousands of calls
++	 * a second), holding its main thread, and lightdm restarts the
++	 * compositor on a timeout once a minute.
++	 */
++	*ret = 1;
+ 
+ 	return 0;
+ }
+diff --git a/include/drm/drm_auth.h b/include/drm/drm_auth.h
+index 81a40c2a9..2d9cf533d 100644
+--- a/include/drm/drm_auth.h
++++ b/include/drm/drm_auth.h
+@@ -76,10 +76,17 @@ struct drm_master {
+ 	struct idr magic_map;
+ 	struct drm_lock_data lock;
+ 	void *driver_priv;
++	/**
++	 * @owner_tgid: The thread group that took ownership of the device.
++	 * Needed to allow taking the master over within a single process
++	 * (see drm_setmaster_ioctl). Protected by &drm_device.master_mutex.
++	 */
++	pid_t owner_tgid;
+ };
+ 
+ struct drm_master *drm_master_get(struct drm_master *master);
+ void drm_master_put(struct drm_master **master);
+ bool drm_is_current_master(struct drm_file *fpriv);
++bool drm_same_process_as_master(struct drm_file *fpriv);
+ 
+ #endif

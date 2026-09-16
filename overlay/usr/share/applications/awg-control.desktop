@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AmneziaWG
+Comment=VPN control
+Comment[ru]=Управление VPN
+Exec=webapp-container --store-session-cookies --webappUrlPatterns=http://127.0.0.1:8099/* http://127.0.0.1:8099/
+Icon=/usr/local/share/awg-control/awg.svg
+Terminal=false
+Categories=Network;
+X-Lomiri-Touch=true

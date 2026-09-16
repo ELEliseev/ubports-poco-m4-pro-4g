@@ -1,0 +1,48 @@
+diff --git a/drivers/media/platform/mtk-vcodec/mtk_vcodec_dec.c b/drivers/media/platform/mtk-vcodec/mtk_vcodec_dec.c
+index ced6db110..2e76d4715 100644
+--- a/drivers/media/platform/mtk-vcodec/mtk_vcodec_dec.c
++++ b/drivers/media/platform/mtk-vcodec/mtk_vcodec_dec.c
+@@ -77,6 +77,25 @@ static void get_supported_format(struct mtk_vcodec_ctx *ctx)
+ 				break;
+ 			}
+ 		}
++
++		/*
++		 * The firmware lists MediaTek's own block formats first and
++		 * the plain ones (YV12, NV12) last.  Android always asks for
++		 * a block format explicitly, but the GStreamer V4L2 decoder
++		 * only reads back the format the driver already has and gives
++		 * up on an unknown fourcc ("V4L2 format M21S not supported"),
++		 * so default to a plain format whenever one is offered.
++		 */
++		for (i = 0; i < MTK_MAX_DEC_CODECS_SUPPORT; i++) {
++			if (mtk_video_formats[i].type != MTK_FMT_FRAME)
++				continue;
++			if (mtk_video_formats[i].fourcc == V4L2_PIX_FMT_NV12) {
++				default_cap_fmt_idx = i;
++				break;
++			}
++			if (mtk_video_formats[i].fourcc == V4L2_PIX_FMT_YVU420)
++				default_cap_fmt_idx = i;
++		}
+ 	}
+ }
+ 
+@@ -1221,7 +1240,16 @@ static int vidioc_vdec_qbuf(struct file *file, void *priv,
+ 				ctx->input_max_ts);
+ 		}
+ 	} else {
+-		if (buf->reserved2 == 0xFFFFFFFF)
++		/*
++		 * The published kernel source expects userspace to mark
++		 * "no general buffer" with 0xFFFFFFFF, but the vendor
++		 * userspace shipped on this device (libvcodec/vpud) leaves
++		 * reserved2 at 0.  Taking that literally makes buf_prepare
++		 * call dma_buf_get(0), which fails, every capture buffer is
++		 * rejected and the Codec2 component reports C2_CORRUPTED.
++		 * fd 0 is stdin and never a dmabuf, so treat it as "none".
++		 */
++		if (buf->reserved2 == 0xFFFFFFFF || buf->reserved2 == 0)
+ 			mtkbuf->general_user_fd = -1;
+ 		else
+ 			mtkbuf->general_user_fd = (int)buf->reserved2;

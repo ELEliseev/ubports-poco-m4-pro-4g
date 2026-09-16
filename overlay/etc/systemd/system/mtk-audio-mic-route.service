@@ -1,0 +1,25 @@
+[Unit]
+# The vendor HAL on fleur sets up the playback path itself, but leaves the
+# capture path alone: "Mic Type Mux", "ADC L/R Mux" and "PGA L/R Mux" all stay
+# Idle, so recording runs but every sample is zero. Hence we assemble the
+# microphone route ourselves. The main microphone was found by trial: it is on
+# AIN0 (AIN1 is empty, AIN2 is the second microphone).
+Description=MT6781 microphone route (AIN0 -> preamplifier -> ADC -> UL1)
+After=sound.target
+Before=lightdm.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amixer -c0 cset name='Mic Type Mux' ACC
+ExecStart=/usr/bin/amixer -c0 cset name='PGA L Mux' AIN0
+ExecStart=/usr/bin/amixer -c0 cset name='ADC L Mux' 'Left Preamplifier'
+ExecStart=/usr/bin/amixer -c0 cset name='PGA R Mux' AIN2
+ExecStart=/usr/bin/amixer -c0 cset name='ADC R Mux' 'Right Preamplifier'
+ExecStart=/usr/bin/amixer -c0 cset numid=364 4
+ExecStart=/usr/bin/amixer -c0 cset numid=365 4
+ExecStart=/usr/bin/amixer -c0 cset name='UL1_CH1 ADDA_UL_CH1' 1
+ExecStart=/usr/bin/amixer -c0 cset name='UL1_CH2 ADDA_UL_CH2' 1
+
+[Install]
+WantedBy=multi-user.target
